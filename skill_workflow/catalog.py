@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from urllib.parse import unquote
 
 import yaml
@@ -37,6 +38,7 @@ class Skill:
     enabled: bool | None = None
     references: list[dict] = field(default_factory=list)
     captured_at: str = ""
+    visibility: str = "unknown"
 
 
 @dataclass
@@ -65,7 +67,13 @@ def load_json(path: str | Path):
 
 
 def is_link(path: Path) -> bool:
-    return path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction())
+    if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+        return True
+    # Path.is_junction was added in Python 3.12; support the declared 3.11 floor.
+    try:
+        return bool(getattr(path.lstat(), "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    except FileNotFoundError:
+        return False
 
 
 def inspect_skill(path: str | Path) -> Skill:
@@ -167,17 +175,23 @@ def import_atlas(path: str | Path) -> Catalog:
     if not isinstance(atlas, dict) or type(atlas.get("schemaVersion")) is not int or atlas["schemaVersion"] != 1 or not isinstance(atlas.get("skills"), list):
         raise ValueError("不支持的 atlas 格式，需要 schemaVersion=1 和 skills 数组")
     catalog = Catalog()
-    seen = set()
+    seen = {}
     for record in atlas["skills"]:
         if not isinstance(record, dict) or not isinstance(record.get("path"), str) or not Path(record["path"]).is_absolute():
             raise ValueError("atlas 每个技能必须包含本机绝对 path")
         skill = inspect_skill(record["path"])
+        evidence = {k: v for k, v in record.items() if k != "path"}
         if skill.id in seen:
+            if seen[skill.id] != evidence:
+                raise ValueError(f"atlas 同一来源存在相互冲突的重复记录：{skill.path}")
             continue
-        seen.add(skill.id)
+        seen[skill.id] = evidence
         historical = record.get("historical")
         skill.historical = historical.copy() if isinstance(historical, dict) else {}
         skill.enabled = record.get("enabled") if isinstance(record.get("enabled"), bool) else None
+        skill.visibility = str(record.get("visibility", "unknown"))
+        if skill.visibility == "disabled":
+            skill.enabled = False
         skill.captured_at = str(atlas.get("capturedAt", ""))
         skill.evidence_matches = bool(skill.sha256 and skill.sha256 == record.get("sha256"))
         if skill.evidence_matches:

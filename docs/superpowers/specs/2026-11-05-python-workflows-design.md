@@ -31,12 +31,10 @@
 - 路径与名称校验；不跟随递归目录链接；扫描忽略 .git/node_modules/venv 等依赖目录。文件写入仅针对用户明确选择的工作流/运行/导出位置。
 - 界面以中文为主。复杂操作使用后台扫描避免冻结界面；错误在界面可见。原文与导出预览用纯文本显示。
 
-## 本轮边界
-
 ## 构建审阅后的明确约定
 
 - 导出 `SKILL.md` 必须有 YAML `name`、`description`；逐步列出依赖、任务说明、产物、绝对来源路径和 SHA-256。`sources.lock.json` 记录去重来源。导出的指令要求宿主在每个审核点等待本次运行的用户明确通过，不能把历史通过当作本次通过。应用内状态机强制阻塞；导出文本仍依赖宿主遵循指令，不能保证外部宿主的执行行为。
-- 兼容既有 atlas schemaVersion=1 的 `skills[].path/sha256/enabled/historical/references` 和顶层 `capturedAt`。只有源哈希一致才复用显式引用证据；历史运行状态永远标为历史。`enabled=false` 是快照禁用证据，选择时阻塞；目录扫描不推断宿主启用状态，标为未知。
+- 兼容既有 atlas schemaVersion=1 的 `skills[].path/sha256/enabled/visibility/historical/references` 和顶层 `capturedAt`。只有源哈希一致才复用显式引用证据；历史运行状态永远标为历史。`enabled=false` 或 `visibility=disabled` 是快照禁用证据，选择时阻塞；目录扫描不推断宿主启用状态，标为未知。
 - JSON 新建/保存/状态变更和恢复均展示差异。GUI 确认差异后写入；CLI 默认预览，显式 `--apply` 才写。覆盖前自动备份；提供从备份恢复 JSON 的入口。读取和最终写入之间用预期摘要和排他锁阻止本应用并发覆盖。
 - 主文件锁定不覆盖脚本/资源目录全部内容；缺失 Markdown 链接是警告，可能属于可选分支。应用不会推断未被明确声明的调用关系。
 

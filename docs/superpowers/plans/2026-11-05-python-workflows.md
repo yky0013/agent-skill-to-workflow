@@ -32,9 +32,9 @@ Files: `skill_workflow/catalog.py`, package metadata, `tests/test_catalog.py`.
 
 Interfaces: `scan_roots(roots) -> Catalog`; `import_atlas(path) -> Catalog`; Skill records include path/name/description/sha256/issues/historical; `Catalog.skills` and `Catalog.issues` are serializable.
 
-- [ ] Write and run failing tests for duplicate names, bad frontmatter, missing links, excluded dependency directories, stale historical atlas and missing roots.
-- [ ] Implement safe YAML parsing, stable path identity, link checks and atlas reconciliation.
-- [ ] Run `python -m unittest discover -s tests -v`; expected all catalog tests pass.
+- [x] Write and run failing tests for duplicate names, bad frontmatter, missing links, excluded dependency directories, stale historical atlas and missing roots.
+- [x] Implement safe YAML parsing, stable path identity, link checks and atlas reconciliation.
+- [x] Run `python -m unittest discover -s tests -v`; expected all catalog tests pass.
 
 ## Task 2: Workflow validation, tracking and export
 
@@ -42,17 +42,17 @@ Files: `skill_workflow/workflow.py`, `storage.py`, `runner.py`, `exporter.py`; c
 
 Interfaces: `validate_workflow(dict) -> list[Issue]`, `ordered_steps(dict) -> list[dict]`, `create_run(workflow) -> dict`, `complete_step(run,id,note,artifacts)`, `review_step(run,id,decision,note)`, `ready_steps(run)`, `render_skill(workflow) -> str`, `export_workflow(workflow,destination)`; `save_json(path,data,expected_digest)`.
 
-- [ ] Add failing graph/schema/source-drift tests, review-gate transition tests, atomic persistence/conflict tests and export collision tests.
-- [ ] Implement validation, source locking, explicit state transitions, backups and staged export.
-- [ ] Run the full Python suite, expected all tests pass.
+- [x] Add failing graph/schema/source-drift tests, review-gate transition tests, atomic persistence/conflict tests and export collision tests.
+- [x] Implement validation, source locking, explicit state transitions, backups and staged export.
+- [x] Run the full Python suite, expected all tests pass.
 
 ## Task 3: Desktop, CLI, documentation and delivery
 
 Files: `skill_workflow/cli.py`, `gui.py`, `__main__.py`, `tests/test_cli.py`, `tests/test_gui.py`, examples, README, Python CI.
 
-- [ ] Add CLI integration tests completing an actual temporary fixture workflow and tests exercising desktop controller transitions.
-- [ ] Implement Chinese Tkinter catalog/workflow/run/preview views plus argparse commands using the shared core.
-- [ ] Run tests and a real Tkinter smoke check; run read-only import of existing local atlas.
-- [ ] Update root README with the new quick start, evidence limitations, artifact locations and retained legacy entry point; add an architecture document and examples.
-- [ ] Perform a fresh independent whole-branch review; fix important findings with regression tests and run the full suite.
+- [x] Add CLI integration tests completing an actual temporary fixture workflow and tests exercising desktop controller transitions.
+- [x] Implement Chinese Tkinter catalog/workflow/run/preview views plus argparse commands using the shared core.
+- [x] Run tests with actual Tk widgets and read-only import of existing local atlas (234 entries, 224 matching sources, 10 unavailable, 16 snapshot-disabled). Native screenshot layout inspection is pending: Windows desktop is locked.
+- [x] Update root README with the new quick start, evidence limitations, artifact locations and retained legacy entry point; add an architecture document and examples.
+- [x] Perform a fresh independent whole-branch review; fix important findings with regression tests and run the full suite. Five confirmed findings fixed; 46/46 tests passed.
 - [ ] Commit the validated branch and prepare a draft PR if GitHub connectivity and permissions allow. Do not merge the default branch.

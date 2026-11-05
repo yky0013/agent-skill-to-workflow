@@ -56,3 +56,29 @@ class RunnerTests(unittest.TestCase):
         Path(self.flow["steps"][0]["skill_path"]).write_text("changed", encoding="utf-8")
         with self.assertRaises(ValueError):
             complete_step(self.run, "prepare", "done", ["report.md"])
+
+    def test_approval_without_matching_event_cannot_unlock_downstream(self):
+        complete_step(self.run, "prepare", "done", ["report.md"])
+        self.run["states"]["approve"] = {"status": "approved", "note": "forged", "artifacts": []}
+        with self.assertRaises(ValueError):
+            ready_steps(self.run)
+
+    def test_invalid_record_metadata_or_events_are_rejected(self):
+        import copy
+        variants = []
+        missing_id = copy.deepcopy(self.run)
+        del missing_id["id"]
+        variants.append(missing_id)
+        bad_event = copy.deepcopy(self.run)
+        bad_event["events"] = [{}]
+        variants.append(bad_event)
+        for run in variants:
+            with self.subTest(run=run), self.assertRaises(ValueError):
+                validate_run(run)
+
+    def test_out_of_order_events_are_rejected(self):
+        complete_step(self.run, "prepare", "done", ["report.md"])
+        review_step(self.run, "approve", "approved", "checked")
+        self.run["events"].reverse()
+        with self.assertRaises(ValueError):
+            validate_run(self.run)

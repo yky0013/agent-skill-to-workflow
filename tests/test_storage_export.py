@@ -65,3 +65,12 @@ class StorageExportTests(unittest.TestCase):
         text = render_skill(self.flow)
         self.assertNotIn("# Read the input", text)
         self.assertIn(self.flow["steps"][0]["skill_sha256"], text)
+
+    def test_existing_destination_lock_prevents_mutation(self):
+        target = self.root / "locked.json"
+        lock = self.root / ".locked.json.workflow-lock"
+        lock.write_text("another writer", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            save_json(target, {"value": 1}, expected_digest=None)
+        self.assertFalse(target.exists())
+        self.assertTrue(lock.exists())

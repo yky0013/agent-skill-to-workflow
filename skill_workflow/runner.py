@@ -25,9 +25,28 @@ def _satisfied(state):
     return state["status"] in ("completed", "approved")
 
 
+def _timestamp(value):
+    if not isinstance(value, str):
+        raise ValueError("运行记录缺少有效时间")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("运行记录时间格式无效") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("运行记录时间必须包含时区")
+
+
 def validate_run(run):
     if not isinstance(run, dict) or type(run.get("schemaVersion")) is not int or run["schemaVersion"] != 1:
         raise ValueError("不支持的运行记录格式")
+    identifier = run.get("id")
+    if not isinstance(identifier, str):
+        raise ValueError("运行记录缺少 id")
+    try:
+        uuid.UUID(identifier)
+    except ValueError as exc:
+        raise ValueError("运行记录 id 无效") from exc
+    _timestamp(run.get("created_at"))
     workflow = run.get("workflow")
     require_valid(workflow, check_sources=False)
     if run.get("workflow_sha256") != digest_bytes(json_bytes(workflow)):
@@ -36,23 +55,34 @@ def validate_run(run):
     if not isinstance(states, dict) or set(states) != {s["id"] for s in workflow["steps"]}:
         raise ValueError("运行步骤状态不完整")
     events = run.get("events")
-    if not isinstance(events, list) or any(not isinstance(e, dict) for e in events):
+    if not isinstance(events, list):
         raise ValueError("运行事件记录无效")
-    for step in workflow["steps"]:
-        state = states[step["id"]]
-        allowed = ("pending", "completed") if step["kind"] == "skill" else ("pending", "approved", "rejected")
-        if not isinstance(state, dict) or state.get("status") not in allowed:
-            raise ValueError(f"步骤状态非法：{step['id']}")
-        if state["status"] != "pending":
-            if not all(_satisfied(states[d]) for d in step["depends_on"]):
-                raise ValueError(f"依赖未通过却已推进步骤：{step['id']}")
-            if not isinstance(state.get("note"), str) or not state["note"].strip():
-                raise ValueError("完成/审核记录缺少说明")
-            if step["kind"] == "skill":
-                artifacts = state.get("artifacts")
-                if not isinstance(artifacts, list) or not all(isinstance(a, str) and a.strip() for a in artifacts) or (step.get("outputs") and not artifacts):
-                    raise ValueError("完成步骤缺少有效产物引用")
-    expected_status = "completed" if all(_satisfied(s) for s in states.values()) else "active"
+    steps = {s["id"]: s for s in workflow["steps"]}
+    replay = {sid: {"status": "pending", "note": "", "artifacts": []} for sid in steps}
+    for event in events:
+        if not isinstance(event, dict) or set(event) != {"step_id", "status", "note", "artifacts", "at"}:
+            raise ValueError("运行事件字段不完整或包含不支持的字段")
+        sid = event["step_id"]
+        if not isinstance(sid, str) or sid not in steps:
+            raise ValueError("运行事件引用了未知步骤")
+        step = steps[sid]
+        if _satisfied(replay[sid]) or not all(_satisfied(replay[d]) for d in step["depends_on"]):
+            raise ValueError(f"运行事件顺序非法或依赖尚未通过：{sid}")
+        allowed = ("completed",) if step["kind"] == "skill" else ("approved", "rejected")
+        if event["status"] not in allowed:
+            raise ValueError(f"运行事件状态不符合步骤类型：{sid}")
+        if not isinstance(event["note"], str) or not event["note"].strip():
+            raise ValueError("完成/审核事件缺少说明")
+        _timestamp(event["at"])
+        artifacts = event["artifacts"]
+        if not isinstance(artifacts, list) or not all(isinstance(a, str) and a.strip() for a in artifacts):
+            raise ValueError("事件产物引用格式无效")
+        if (step["kind"] == "skill" and step.get("outputs") and not artifacts) or (step["kind"] == "review" and artifacts):
+            raise ValueError("事件产物不符合步骤要求")
+        replay[sid] = {key: value for key, value in event.items() if key != "step_id"}
+    if states != replay:
+        raise ValueError("运行步骤状态与事件历史不一致，拒绝推进")
+    expected_status = "completed" if all(_satisfied(s) for s in replay.values()) else "active"
     if run.get("status") != expected_status:
         raise ValueError("运行总状态与步骤状态不一致")
 

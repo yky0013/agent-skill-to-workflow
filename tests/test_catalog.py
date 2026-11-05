@@ -72,6 +72,22 @@ class CatalogTests(unittest.TestCase):
         atlas.write_text(json.dumps({"schemaVersion": 1, "skills": [{"path": str(self.root / "lost/SKILL.md"), "name": "lost"}]}), encoding="utf-8")
         self.assertTrue(any(i.code == "unreadable" for i in import_atlas(atlas).skills[0].issues))
 
+    def test_visibility_disabled_with_unknown_enabled_is_still_blocked(self):
+        path = self.skill("disabled")
+        atlas = self.root / "atlas.json"
+        atlas.write_text(json.dumps({"schemaVersion": 1, "skills": [{"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "enabled": None, "visibility": "disabled"}]}), encoding="utf-8")
+        skill = import_atlas(atlas).skills[0]
+        self.assertIs(skill.enabled, False)
+        self.assertEqual(skill.visibility, "disabled")
+
+    def test_conflicting_duplicate_atlas_records_are_not_silently_dropped(self):
+        path = self.skill("conflict")
+        atlas = self.root / "atlas.json"
+        records = [{"path": str(path), "enabled": True}, {"path": str(path), "enabled": False}]
+        atlas.write_text(json.dumps({"schemaVersion": 1, "skills": records}), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            import_atlas(atlas)
+
     def test_atlas_schema_and_relative_source_paths_are_rejected(self):
         atlas = self.root / "atlas.json"
         for content in ({"schemaVersion": 9, "skills": []}, {"schemaVersion": 1, "skills": [{"path": "../../SKILL.md"}]}):
