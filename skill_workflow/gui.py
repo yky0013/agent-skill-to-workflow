@@ -21,6 +21,34 @@ HISTORY = {"pass": "历史样例通过", "partial": "历史部分可用", "block
 STATUS = {"pending": "待推进", "completed": "已登记完成", "approved": "审核通过", "rejected": "已退回，待复审"}
 
 
+def format_run_details(run, sid):
+    steps = {step["id"]: step for step in run["workflow"]["steps"]}
+    step, state = steps[sid], run["states"][sid]
+    lines = [f"{step['title']} · {STATUS[state['status']]}"]
+    if step["kind"] == "review":
+        lines.append("审核标准：" + step["criteria"])
+    lines.append("任务说明：" + step["instruction"])
+    if step["depends_on"]:
+        lines.append("前置步骤：" + "；".join(f"{steps[d]['title']}（{STATUS[run['states'][d]['status']]}）" for d in step["depends_on"]))
+        for dep in step["depends_on"]:
+            artifacts = run["states"][dep]["artifacts"]
+            if artifacts:
+                lines.append("上游产物 · " + steps[dep]["title"] + "：" + "；".join(artifacts))
+    if step.get("outputs"):
+        lines.append("预期产物：" + "；".join(step["outputs"]))
+    lines.extend(["", "当前记录：" + (state["note"] or "尚未登记")])
+    if state["artifacts"]:
+        lines.append("已登记产物：" + "；".join(state["artifacts"]))
+    if step["kind"] == "skill":
+        lines.extend(["", "技能来源：" + step["skill_path"]])
+    events = [event for event in run["events"] if event["step_id"] == sid]
+    if events:
+        lines.extend(["", "处理记录（最近在前）："])
+        for event in reversed(events):
+            lines.append(f"{event['at']} · {STATUS[event['status']]}\n{event['note']}")
+    return "\n".join(lines)
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -571,8 +599,7 @@ class App:
             self.put_text(self.note_text, draft.get("note", ""))
             self.put_text(self.artifacts_text, draft.get("artifacts", ""))
         step = next(s for s in self.run["workflow"]["steps"] if s["id"] == sid)
-        text = json.dumps({"任务": step, "当前记录": self.run["states"][sid], "事件历史": [e for e in self.run["events"] if e["step_id"] == sid]}, ensure_ascii=False, indent=2)
-        self.put_text(self.run_details, text, True)
+        self.put_text(self.run_details, format_run_details(self.run, sid), True)
         if sid in ready_steps(self.run):
             buttons = (self.complete_button,) if step["kind"] == "skill" else (self.approve_button, self.reject_button)
             for button in buttons:

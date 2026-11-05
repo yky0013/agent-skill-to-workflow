@@ -52,7 +52,7 @@ Files: `skill_workflow/cli.py`, `gui.py`, `__main__.py`, `tests/test_cli.py`, `t
 
 - [x] Add CLI integration tests completing an actual temporary fixture workflow and tests exercising desktop controller transitions.
 - [x] Implement Chinese Tkinter catalog/workflow/run/preview views plus argparse commands using the shared core.
-- [x] Run tests with actual Tk widgets and read-only import of existing local atlas (234 entries, 224 matching sources, 10 unavailable, 16 snapshot-disabled). Native screenshot layout inspection is pending: Windows desktop is locked.
+- [x] Run tests with actual Tk widgets and read-only import of existing local atlas (234 entries, 224 matching sources, 10 unavailable, 16 snapshot-disabled). After desktop unlock, native layout and export/review interactions verified, including persisted rejection/approval and preserved input drafts.
 - [x] Update root README with the new quick start, evidence limitations, artifact locations and retained legacy entry point; add an architecture document and examples.
 - [x] Perform a fresh independent whole-branch review; fix important findings with regression tests and run the full suite. Five confirmed findings fixed; 46/46 tests passed.
-- [ ] Commit the validated branch and prepare a draft PR if GitHub connectivity and permissions allow. Do not merge the default branch.
+- [x] Commit the validated branch and prepare a draft PR: https://github.com/yky0013/agent-skill-to-workflow/pull/1. Default branch remains unmerged.
