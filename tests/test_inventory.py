@@ -400,9 +400,9 @@ class LocalInventoryTests(unittest.TestCase):
 
         inventory = self.discover()
 
-        by_path = {record.path: record for record in inventory.catalog.skills}
-        self.assertIs(by_path[str(plugin_skill.absolute())].enabled, False)
-        self.assertIsNone(by_path[str(user_skill.absolute())].enabled)
+        by_path = {Path(record.path).resolve(): record for record in inventory.catalog.skills}
+        self.assertIs(by_path[plugin_skill.resolve()].enabled, False)
+        self.assertIsNone(by_path[user_skill.resolve()].enabled)
 
     def test_disabled_plugin_forces_its_skills_off_after_skill_enable_rules(self):
         disabled_root = self.plugin(
@@ -427,9 +427,21 @@ class LocalInventoryTests(unittest.TestCase):
 
         inventory = self.discover()
 
-        by_path = {record.path: record for record in inventory.catalog.skills}
-        self.assertIs(by_path[str(disabled_skill.absolute())].enabled, False)
-        self.assertIsNone(by_path[str(unknown_skill.absolute())].enabled)
+        by_path = {Path(record.path).resolve(): record for record in inventory.catalog.skills}
+        self.assertIs(by_path[disabled_skill.resolve()].enabled, False)
+        self.assertIsNone(by_path[unknown_skill.resolve()].enabled)
+
+    def test_equivalent_config_path_keeps_skill_disabled(self):
+        skill = self.skill(self.codex_home / "skills", "task-skill", "task-skill")
+        alias_parent = self.codex_home / "skills" / "alias"
+        alias_parent.mkdir()
+        alternate = alias_parent / ".." / "task-skill" / "SKILL.md"
+        self.assertEqual(alternate.resolve(), skill.resolve())
+        self.codex_home.joinpath("config.toml").write_text(
+            f'[skills]\nconfig = [{{path = "{alternate.as_posix()}", enabled = false}}]\n', encoding="utf-8"
+        )
+        inventory = self.discover()
+        self.assertIs(inventory.catalog.skills[0].enabled, False)
 
     def test_command_target_rejects_inline_arguments_shells_and_urls_without_echoing_them(self):
         safe_path = "C:/Program Files/MCP Tools/My MCP Server.exe"

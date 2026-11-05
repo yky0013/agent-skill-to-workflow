@@ -37,5 +37,5 @@
 - [x] Inventory implementation and tests
 - [x] Remove review core; migrate legacy workflows
 - [x] GUI auto-discovery and lists
-- [x] Integration tests (83 passed) and real-data Tk list population verified. Native screenshot inspection blocked by locked desktop; packaging performed at delivery.
-- [ ] Push and rewrite PR around final scope
+- [x] Integration tests (84 passed) and real-data Tk list population verified. Native screenshot inspection blocked by locked desktop; packaging performed at delivery.
+- [x] Push and rewrite PR #1 around final scope; default branch remains unmerged.

@@ -134,7 +134,11 @@ def _apply_skill_policies(catalog: Catalog, config: dict, config_path: Path, iss
         if not isinstance(name, str) and not isinstance(raw_path, str):
             issues.append(Issue("warning", "invalid_skill_config", "技能策略需要 name 或 path", str(config_path)))
             continue
-        configured_path = _absolute(raw_path, config_path.parent) if isinstance(raw_path, str) else None
+        try:
+            configured_path = _absolute(raw_path, config_path.parent).resolve() if isinstance(raw_path, str) else None
+        except (OSError, ValueError, RuntimeError):
+            issues.append(Issue("warning", "invalid_skill_path", "无法规范化技能配置路径", str(config_path)))
+            continue
         configured_key = os.path.normcase(str(configured_path)) if configured_path else ""
         for skill in catalog.skills:
             matches_name = isinstance(name, str) and skill.name.casefold() == name.casefold()
@@ -154,7 +158,10 @@ def _apply_skill_policies(catalog: Catalog, config: dict, config_path: Path, iss
                             plugin_name.casefold(),
                             f"{plugin_name}@{marketplace}".casefold(),
                         }
-            skill_path = Path(skill.path).absolute()
+            try:
+                skill_path = Path(skill.path).resolve()
+            except (OSError, ValueError, RuntimeError):
+                continue
             matches_path = bool(
                 configured_path
                 and configured_key
