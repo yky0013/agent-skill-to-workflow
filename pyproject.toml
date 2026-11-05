@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-skill-to-workflow"
+version = "0.1.0"
+description = "Python skill workflow builder with explicit human review gates"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0,<7"]
+
+[project.scripts]
+skill-workflow = "skill_workflow.cli:main"
+
+[tool.setuptools]
+packages = ["skill_workflow"]

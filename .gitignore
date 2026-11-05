@@ -23,3 +23,12 @@ target/
 project.md
 DesignDoc.md
 chat-plan.md
+
+# Python workbench and private local audit/run artifacts
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+.workflow-local/
+.superpowers/
