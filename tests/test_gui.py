@@ -22,7 +22,7 @@ class GuiTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.flow = example_workflow(self.temp.name)
-        self.app = App(self.root)
+        self.app = App(self.root, autoload=False)
 
     def test_edit_save_reload_and_cancelled_preview(self):
         self.app.model.workflow = copy.deepcopy(self.flow)
@@ -41,27 +41,30 @@ class GuiTests(unittest.TestCase):
         self.app.load_workflow(target)
         self.assertEqual(self.app.model.workflow["steps"][0]["title"], "核查输入")
 
-    def test_add_review_button_preserves_step_instruction(self):
+    def test_reordering_preserves_step_instruction_without_review_controls(self):
         self.app.model.workflow = copy.deepcopy(self.flow)
         self.app.show_workflow()
         self.app.step_tree.selection_set("prepare")
         self.app.select_step()
         self.app.instruction_text.delete("1.0", "end")
         self.app.instruction_text.insert("1.0", "先检查输入")
-        self.app.add_review()
-        self.assertEqual(self.app.model.workflow["steps"][0]["instruction"], "先检查输入")
-        self.assertEqual(len(self.app.model.workflow["steps"]), 4)
+        self.app.move_step(1)
+        step = next(s for s in self.app.model.workflow["steps"] if s["id"] == "prepare")
+        self.assertEqual(step["instruction"], "先检查输入")
+        self.assertEqual(len(self.app.model.workflow["steps"]), 3)
+        self.assertFalse(hasattr(self.app, "approve_button"))
+        self.assertFalse(hasattr(self.app, "criteria_text"))
 
     def test_switching_run_steps_preserves_unsent_notes(self):
         self.app.run = create_run(self.flow)
         self.app.refresh_run()
-        self.app.note_text.insert("1.0", "未提交的审核备注")
+        self.app.note_text.insert("1.0", "未提交的执行备注")
         self.app.artifacts_text.insert("1.0", "evidence.md")
-        self.app.run_tree.selection_set("approve")
+        self.app.run_tree.selection_set("transform")
         self.app.show_run_step()
         self.app.run_tree.selection_set("prepare")
         self.app.show_run_step()
-        self.assertEqual(self.app.note_text.get("1.0", "end-1c"), "未提交的审核备注")
+        self.assertEqual(self.app.note_text.get("1.0", "end-1c"), "未提交的执行备注")
         self.assertEqual(self.app.artifacts_text.get("1.0", "end-1c"), "evidence.md")
 
     def test_latest_requested_scan_replaces_inflight_scan_result(self):

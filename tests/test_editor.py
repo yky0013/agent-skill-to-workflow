@@ -18,14 +18,18 @@ class EditorTests(unittest.TestCase):
 
     def test_add_move_remove_maintain_linear_dependencies(self):
         self.model.add_skill(self.skill)
-        self.model.add_review()
+        self.model.add_skill(self.skill)
         self.model.add_skill(self.skill)
         self.model.move_step(2, -1)
-        self.assertEqual([s["kind"] for s in self.model.workflow["steps"]], ["skill", "skill", "review"])
+        self.assertEqual([s["kind"] for s in self.model.workflow["steps"]], ["skill", "skill", "skill"])
         self.model.remove_step(1)
         a, b = self.model.workflow["steps"]
         self.assertEqual(a["depends_on"], [])
         self.assertEqual(b["depends_on"], [a["id"]])
+
+    def test_new_workbench_is_v2_and_has_no_review_api(self):
+        self.assertEqual(self.model.workflow["schemaVersion"], 2)
+        self.assertFalse(hasattr(self.model, "add_review"))
 
     def test_dag_edit_refuses_silent_dependency_rewiring(self):
         self.model.workflow = copy.deepcopy(self.flow)

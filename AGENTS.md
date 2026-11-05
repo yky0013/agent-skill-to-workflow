@@ -4,6 +4,7 @@
 
 - `skill_workflow/` contains the independent Python skill orchestration workbench; see `docs/python-workbench.md` for its architecture and evidence boundaries.
 - Prefer Python for new workflow features, in line with the repository owner's language preference. Do not expand the legacy TypeScript/Rust app to implement functionality already handled by the Python core.
+- The owner removed human-review workflow gates. New workflows contain skill steps only; do not reintroduce review/approval nodes or review commands. Default startup must show real local Skills, MCP and plugin inventories.
 - Workflow/run JSON and exports are user-managed artifacts: preview, backup before replacement, atomic write, re-validate. Do not execute skill text or interpret historical audit success as current runtime success.
 - Run `python -m unittest discover -s tests -v` for Python changes. GUI tests require Tk and a display (use Xvfb in headless Linux). The legacy Cargo checks below apply to the retained Tauri app; report explicitly if the toolchain is unavailable.
 - Never commit private local atlases, skill contents copied from a user's installation, or generated runs. Use the ignored `.workflow-local/` directory for local verification.

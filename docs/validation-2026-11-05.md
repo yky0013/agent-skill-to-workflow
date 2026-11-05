@@ -1,5 +1,7 @@
 # 2026-11-05 Python 工作台验证记录
 
+> 历史记录：本页记录 0.1 版。用户随后移除了人工审核，0.2 版以 `validation-inventory-2026-11-05.md` 为当前验证记录。
+
 ## 已验证
 
 - Windows，Python 3.14.0，PyYAML 6.0.3；在仓库隔离 `.venv` 中运行 `python -m unittest discover -s tests -v`：46 项通过，无失败或跳过。

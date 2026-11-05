@@ -7,7 +7,7 @@ from .catalog import inspect_skill
 
 class Workbench:
     def __init__(self):
-        self.workflow = {"schemaVersion": 1, "name": "my-workflow", "description": "描述何时使用这个组合技能及其交付物", "steps": []}
+        self.workflow = {"schemaVersion": 2, "name": "my-workflow", "description": "描述何时使用这个组合技能及其交付物", "steps": []}
 
     def _linear(self):
         previous = []
@@ -38,10 +38,6 @@ class Workbench:
         self._append({"kind": "skill", "title": skill.name, "instruction": skill.description,
                       "outputs": ["本步骤产物及验证说明"], "skill_path": skill.path,
                       "skill_sha256": skill.sha256, "source_enabled": skill.enabled})
-
-    def add_review(self):
-        self._append({"kind": "review", "title": "人工审核", "instruction": "展示上游产物和验证证据，等待本次明确审核决定。",
-                      "criteria": "输入与目标一致；证据支持结论；产物完整且可读。", "outputs": []})
 
     def move_step(self, index, delta):
         self._linear()

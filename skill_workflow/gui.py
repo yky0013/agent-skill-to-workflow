@@ -2,7 +2,6 @@
 
 import copy
 import json
-import os
 from pathlib import Path
 import queue
 import threading
@@ -10,23 +9,23 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from .catalog import Catalog, MAX_SOURCE_BYTES, import_atlas, load_json, read_limited, scan_roots
+from . import __version__
+from .catalog import Catalog, MAX_SOURCE_BYTES, load_json, read_limited
 from .editor import Workbench
 from .exporter import export_workflow, render_skill
-from .runner import complete_step, create_run, ready_steps, review_step, validate_run
+from .inventory import LocalInventory, discover_local
+from .runner import complete_step, create_run, ready_steps, validate_run
 from .storage import preview_json, read_json_versioned, save_json
-from .workflow import require_valid, validate_workflow
+from .workflow import require_valid, upgrade_workflow, validate_workflow
 
 HISTORY = {"pass": "历史样例通过", "partial": "历史部分可用", "blocked": "历史受阻", "untested": "未验证", "disabled": "历史禁用"}
-STATUS = {"pending": "待推进", "completed": "已登记完成", "approved": "审核通过", "rejected": "已退回，待复审"}
+STATUS = {"pending": "待推进", "completed": "已登记完成"}
 
 
 def format_run_details(run, sid):
     steps = {step["id"]: step for step in run["workflow"]["steps"]}
     step, state = steps[sid], run["states"][sid]
     lines = [f"{step['title']} · {STATUS[state['status']]}"]
-    if step["kind"] == "review":
-        lines.append("审核标准：" + step["criteria"])
     lines.append("任务说明：" + step["instruction"])
     if step["depends_on"]:
         lines.append("前置步骤：" + "；".join(f"{steps[d]['title']}（{STATUS[run['states'][d]['status']]}）" for d in step["depends_on"]))
@@ -50,10 +49,16 @@ def format_run_details(run, sid):
 
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, *, codex_home=None, projects=(), autoload=True):
         self.root = root
         self.model = Workbench()
         self.catalog = Catalog()
+        self.inventory = None
+        self.mcps = []
+        self.plugins = []
+        self.codex_home = codex_home
+        self.projects = list(projects)
+        self.source_mode = "local"
         self.roots = []
         self.atlas_path = None
         self.workflow_path = None
@@ -68,12 +73,15 @@ class App:
         self._scanning = False
         self._pending_scan = None
         self._scan_queue = queue.Queue()
-        self.status = tk.StringVar(value="从技能目录开始：只读扫描 → 编排步骤 → 人工审核 → 导出组合技能")
+        self.status = tk.StringVar(value="启动后自动读取本机 Skills、MCP 与插件；选择技能即可编排和导出。")
+        self.inventory_summary = tk.StringVar(value="Skills：待读取　·　MCP：待读取　·　插件：待读取")
         self.query = tk.StringVar()
+        self.mcp_query = tk.StringVar()
+        self.plugin_query = tk.StringVar()
         self.name_var = tk.StringVar()
         self.description_var = tk.StringVar()
         self.title_var = tk.StringVar()
-        root.title("Skill Workflow · 技能工作流工作台")
+        root.title(f"Skill Workflow {__version__} · Skills / MCP 工作台")
         root.geometry("1280x850")
         root.minsize(1020, 700)
         root.configure(background="#eef2f7")
@@ -91,20 +99,28 @@ class App:
         header = ttk.Frame(root, padding=(22, 17, 22, 12))
         header.pack(fill="x")
         ttk.Label(header, text="技能工作流工作台", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(header, text="把独立技能组织成可审阅、可复用的工作流", style="Muted.TLabel").pack(anchor="w", pady=(5, 0))
+        ttk.Label(header, text="查看本机 Skills、MCP 与插件，组合可复用的技能流程", style="Muted.TLabel").pack(anchor="w", pady=(5, 0))
+        ttk.Label(header, textvariable=self.inventory_summary, style="Muted.TLabel").pack(anchor="w", pady=(5, 0))
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True, padx=18, pady=(0, 8))
         self.catalog_tab = ttk.Frame(self.notebook, padding=14)
+        self.mcp_tab = ttk.Frame(self.notebook, padding=14)
+        self.plugin_tab = ttk.Frame(self.notebook, padding=14)
         self.flow_tab = ttk.Frame(self.notebook, padding=14)
         self.run_tab = ttk.Frame(self.notebook, padding=14)
-        for tab, text in ((self.catalog_tab, "  1  技能目录  "), (self.flow_tab, "  2  编排与导出  "), (self.run_tab, "  3  人工审核与运行  ")):
+        for tab, text in ((self.catalog_tab, "  Skills  "), (self.mcp_tab, "  MCP  "), (self.plugin_tab, "  插件  "), (self.flow_tab, "  编排与导出  "), (self.run_tab, "  运行记录  ")):
             self.notebook.add(tab, text=text)
         self._build_catalog()
+        self._build_inventory_tab("mcp")
+        self._build_inventory_tab("plugin")
         self._build_workflow()
         self._build_run()
         ttk.Label(root, textvariable=self.status, style="Muted.TLabel", wraplength=1200, padding=(22, 7, 22, 12)).pack(fill="x")
         self.show_workflow()
+        self.notebook.select(self.catalog_tab)
         root.protocol("WM_DELETE_WINDOW", self.close)
+        if autoload:
+            root.after(50, self.load_initial_inventory)
 
     def action(self, operation):
         def perform():
@@ -135,7 +151,8 @@ class App:
         bar = ttk.Frame(self.catalog_tab)
         bar.pack(fill="x")
         self.button(bar, "添加技能目录", self.choose_root)
-        self.button(bar, "扫描常用目录", self.scan_defaults)
+        self.button(bar, "扫描本机清单", self.scan_defaults)
+        self.button(bar, "选择 Codex 目录", self.choose_codex_home)
         self.button(bar, "导入筛查 atlas.json", self.choose_atlas)
         self.button(bar, "刷新", self.refresh_scan)
         self.button(bar, "加入工作流 →", self.add_selected_skill, True)
@@ -160,7 +177,90 @@ class App:
         self.catalog_tree.bind("<<TreeviewSelect>>", lambda _: self.show_skill())
         self.skill_details = self.text_box(right)
         self.skill_details.pack(fill="both", expand=True, padx=(12, 0))
-        self.put_text(self.skill_details, "选择目录扫描，或导入之前保存的 atlas.json。\n\n同名技能按来源路径区分。目录扫描只证明文件可读取，不证明宿主已启用或完整工作流已运行。\n\n原始 SKILL.md 保持只读。", True)
+        self.put_text(self.skill_details, "正在准备本机技能清单。\n\n选择左侧技能查看来源与原文，再点击「加入工作流」。也可添加项目技能目录或导入历史 atlas.json。", True)
+
+    def _build_inventory_tab(self, kind):
+        tab = self.mcp_tab if kind == "mcp" else self.plugin_tab
+        query = self.mcp_query if kind == "mcp" else self.plugin_query
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x")
+        self.button(bar, "刷新本机清单", self.scan_defaults)
+        self.button(bar, "选择 Codex 目录", self.choose_codex_home)
+        ttk.Label(bar, text="搜索").pack(side="left", padx=(15, 8))
+        ttk.Entry(bar, textvariable=query).pack(side="left", fill="x", expand=True)
+        description = "来自本机配置与插件声明；这里显示配置状态，未执行连接测试。" if kind == "mcp" else "显示配置声明与本地缓存中的插件；缓存记录不自动视为已启用。"
+        ttk.Label(tab, text=description, style="Muted.TLabel").pack(anchor="w", pady=10)
+        split = ttk.Panedwindow(tab, orient="horizontal")
+        split.pack(fill="both", expand=True)
+        left, right = ttk.Frame(split), ttk.Frame(split)
+        split.add(left, weight=4)
+        split.add(right, weight=4)
+        columns = ("name", "transport", "enabled", "source") if kind == "mcp" else ("name", "version", "enabled")
+        headings = ("MCP 名称", "连接类型", "配置状态", "来源") if kind == "mcp" else ("插件名称", "版本", "配置状态")
+        tree = ttk.Treeview(left, columns=columns, show="headings", selectmode="browse")
+        for column, heading in zip(columns, headings):
+            tree.heading(column, text=heading)
+            tree.column(column, width=170 if column == "name" else 110, minwidth=75)
+        scroll = ttk.Scrollbar(left, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+        details = self.text_box(right)
+        details.pack(fill="both", expand=True, padx=(12, 0))
+        setattr(self, kind + "_tree", tree)
+        setattr(self, kind + "_details", details)
+        query.trace_add("write", lambda *_: self.refresh_inventory_list(kind))
+        tree.bind("<<TreeviewSelect>>", lambda _: self.show_inventory_item(kind))
+        self.put_text(details, "选择左侧条目查看本机来源和详细信息。", True)
+
+    def refresh_inventory_list(self, kind):
+        tree = getattr(self, kind + "_tree")
+        details = getattr(self, kind + "_details")
+        query = getattr(self, kind + "_query").get().casefold().strip()
+        records = self.mcps if kind == "mcp" else self.plugins
+        selected = tree.selection()
+        tree.delete(*tree.get_children())
+        for item in records:
+            if query and query not in f"{item.name} {item.source} {getattr(item, 'description', '')} {getattr(item, 'target', '')}".casefold():
+                continue
+            state = {True: "配置启用", False: "配置禁用", None: "未确定"}[item.enabled]
+            values = (item.name, item.transport, state, Path(item.source).name) if kind == "mcp" else (item.name, item.version or "未知", state)
+            tree.insert("", "end", iid=item.id, values=values)
+        rows = tree.get_children()
+        if rows:
+            tree.selection_set(selected[0] if selected and tree.exists(selected[0]) else rows[0])
+            self.show_inventory_item(kind)
+        else:
+            message = "没有匹配的条目，请调整搜索词。" if records else "当前来源未发现此类条目。可选择正确的 Codex 目录后刷新。"
+            if self.inventory:
+                message += "\n\n配置来源：" + self.inventory.config_path
+                message += "\n" + "\n".join(i.message for i in self.inventory.issues)
+            self.put_text(details, message, True)
+
+    def show_inventory_item(self, kind):
+        selected = getattr(self, kind + "_tree").selection()
+        records = self.mcps if kind == "mcp" else self.plugins
+        item = next((item for item in records if selected and item.id == selected[0]), None)
+        if not item:
+            return
+        state = {True: "配置启用", False: "配置禁用", None: "未从本机配置确定"}[item.enabled]
+        lines = [item.name, "配置状态：" + state, "来源：" + item.source, ""]
+        if kind == "mcp":
+            lines += ["连接类型：" + item.transport, "目标：" + item.target, "连接测试：未执行", ""]
+            labels = {"command": "启动程序", "args_count": "参数数量", "arg_count": "参数数量", "env_keys": "环境变量名称", "env_var_names": "环境变量名称", "cwd": "工作目录", "host": "服务主机", "port": "端口"}
+            for key, value in item.details.items():
+                shown = "、".join(map(str, value)) if isinstance(value, list) else str(value)
+                lines.append(labels.get(key, key) + "：" + shown)
+        else:
+            lines += ["版本：" + (item.version or "未知"), "本地目录：" + (item.root or "未找到缓存"), "", item.description]
+        if item.issues:
+            lines += ["", "检查提示："] + [i.message for i in item.issues]
+        self.put_text(getattr(self, kind + "_details"), "\n".join(lines), True)
+
+    def update_inventory_summary(self):
+        self.inventory_summary.set(f"Skills：{len(self.catalog.skills)}　·　MCP：{len(self.mcps)}　·　插件：{len(self.plugins)}")
+        for tab, name, count in ((self.catalog_tab, "Skills", len(self.catalog.skills)), (self.mcp_tab, "MCP", len(self.mcps)), (self.plugin_tab, "插件", len(self.plugins))):
+            self.notebook.tab(tab, text=f"  {name} ({count})  ")
 
     def _build_workflow(self):
         bar = ttk.Frame(self.flow_tab)
@@ -183,7 +283,6 @@ class App:
         split.add(right, weight=5)
         controls = ttk.Frame(left)
         controls.pack(fill="x")
-        self.button(controls, "+ 人工审核", self.add_review)
         self.button(controls, "↑", lambda: self.move_step(-1))
         self.button(controls, "↓", lambda: self.move_step(1))
         self.button(controls, "移除", self.remove_step)
@@ -204,9 +303,6 @@ class App:
         ttk.Label(right, text="预期产物 · 每行一项").pack(anchor="w")
         self.outputs_text = self.text_box(right, 2)
         self.outputs_text.pack(fill="x", pady=(3, 7))
-        ttk.Label(right, text="人工审核标准 · 仅审核步骤使用").pack(anchor="w")
-        self.criteria_text = self.text_box(right, 3)
-        self.criteria_text.pack(fill="both", expand=True, pady=(3, 5))
         footer = ttk.Frame(right)
         footer.pack(fill="x")
         self.button(footer, "应用步骤修改", self.apply_editor)
@@ -231,7 +327,7 @@ class App:
         bottom.pack(fill="x")
         notes = ttk.Frame(bottom)
         notes.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        ttk.Label(notes, text="完成 / 审核说明（必填）").pack(anchor="w")
+        ttk.Label(notes, text="完成说明（必填）").pack(anchor="w")
         self.note_text = self.text_box(notes, 3)
         self.note_text.pack(fill="both", expand=True)
         artifacts = ttk.Frame(bottom)
@@ -242,9 +338,7 @@ class App:
         controls = ttk.Frame(self.run_tab)
         controls.pack(fill="x", pady=(8, 0))
         self.complete_button = self.button(controls, "登记技能完成", lambda: self.transition(), True)
-        self.approve_button = self.button(controls, "人工审核通过", lambda: self.transition("approved"), True)
-        self.reject_button = self.button(controls, "退回修改", lambda: self.transition("rejected"))
-        ttk.Label(controls, text="实际执行由你或宿主 agent 完成，工作台负责跟踪与审核。", style="Muted.TLabel").pack(side="right")
+        ttk.Label(controls, text="实际执行由你或宿主 agent 完成，完成步骤后按依赖推进。", style="Muted.TLabel").pack(side="right")
         self.show_run_step()
 
     def background_scan(self, operation):
@@ -253,7 +347,7 @@ class App:
             self.status.set("已更新扫描来源，当前读取结束后会扫描最后选择的来源。")
             return
         self._scanning = True
-        self.status.set("正在只读扫描技能文件…")
+        self.status.set("正在读取本机 Skills、MCP 与插件清单…")
         def worker():
             try:
                 self._scan_queue.put((operation(), None))
@@ -277,47 +371,69 @@ class App:
             self.status.set(f"读取失败：{error}")
             messagebox.showerror("扫描未完成", str(error), parent=self.root)
             return
-        self.catalog = catalog
+        if isinstance(catalog, LocalInventory):
+            self.inventory = catalog
+            self.mcps = catalog.mcps
+            self.plugins = catalog.plugins
+            self.roots = list(catalog.roots)
+            self.catalog = catalog.catalog
+            self.refresh_inventory_list("mcp")
+            self.refresh_inventory_list("plugin")
+        else:
+            self.catalog = catalog
         self.refresh_catalog()
-        errors = sum(any(i.severity == "error" for i in s.issues) for s in catalog.skills)
-        self.status.set(f"读取 {len(catalog.skills)} 个技能入口 · {errors} 个入口需修复 · {len(catalog.issues)} 项目录提示。历史证据不等于本次运行通过。")
-        if catalog.issues:
-            self.put_text(self.skill_details, "目录检查提示\n\n" + "\n".join(i.message for i in catalog.issues), True)
+        self.update_inventory_summary()
+        errors = sum(any(i.severity == "error" for i in s.issues) for s in self.catalog.skills)
+        issues = self.catalog.issues + (self.inventory.issues if self.inventory else [])
+        issues += [issue for item in (*self.mcps, *self.plugins) for issue in item.issues]
+        source = self.inventory.config_path if self.inventory else "；".join(self.roots)
+        self.status.set(f"本机清单已载入：{len(self.catalog.skills)} 个技能，{len(self.mcps)} 个 MCP，{len(self.plugins)} 个插件。{errors} 个技能有读取错误，{len(issues)} 项来源提示。来源：{source}")
+        if not self.catalog.skills:
+            message = "未发现技能，请检查 Codex 目录或添加项目技能目录。\n\n" + "\n".join(i.message for i in issues)
+            self.put_text(self.skill_details, message, True)
+
+    def load_initial_inventory(self):
+        codex_home, projects = self.codex_home, tuple(self.projects)
+        roots, atlas, mode = tuple(self.roots), self.atlas_path, self.source_mode
+        def discover():
+            return discover_local(codex_home=codex_home, projects=projects,
+                                  skill_roots=roots if mode == "roots" else None,
+                                  atlas_path=atlas if mode == "atlas" else None)
+        self.background_scan(discover)
+
+    def choose_codex_home(self):
+        path = filedialog.askdirectory(title="选择包含 config.toml、skills 和 plugins 的 Codex 目录", parent=self.root)
+        if path:
+            self.codex_home = path
+            self.scan_defaults()
 
     def choose_root(self):
         path = filedialog.askdirectory(title="选择包含技能目录的根目录", parent=self.root)
         if path:
+            self.source_mode = "roots"
             self.atlas_path = None
             if path not in self.roots:
                 self.roots.append(path)
             self.refresh_scan()
 
     def scan_defaults(self):
-        home = Path.home()
-        codex = Path(os.environ.get("CODEX_HOME", home / ".codex"))
-        self.roots = [str(p) for p in (codex / "skills", home / ".agents/skills", codex / "plugins/cache") if p.is_dir()]
-        if not self.roots:
-            raise ValueError("未找到常用技能目录，请手动选择根目录")
+        self.source_mode = "local"
+        self.roots = []
         self.atlas_path = None
-        self.refresh_scan()
+        self.load_initial_inventory()
 
     def choose_atlas(self):
         path = filedialog.askopenfilename(title="选择历史筛查 atlas.json", filetypes=[("JSON", "*.json")], parent=self.root)
         if path:
+            self.source_mode = "atlas"
             self.atlas_path = path
             self.refresh_scan()
 
     def refresh_scan(self):
-        if self.atlas_path:
-            path = self.atlas_path
-            self.background_scan(lambda: import_atlas(path))
-        elif self.roots:
-            roots = self.roots.copy()
-            self.background_scan(lambda: scan_roots(roots))
-        else:
-            self.status.set("请先选择技能根目录或 atlas.json。")
+        self.load_initial_inventory()
 
     def refresh_catalog(self):
+        selected = self.catalog_tree.selection()
         self.catalog_tree.delete(*self.catalog_tree.get_children())
         query = self.query.get().casefold().strip()
         for skill in self.catalog.skills:
@@ -325,9 +441,15 @@ class App:
                 continue
             current = "读取错误" if any(i.severity == "error" for i in skill.issues) else ("有提示" if skill.issues else "可读取")
             if skill.enabled is False:
-                current = "快照禁用"
+                current = "快照禁用" if skill.captured_at else "配置禁用"
             history = HISTORY.get(skill.historical.get("status"), skill.historical.get("status", "未验证"))
             self.catalog_tree.insert("", "end", iid=skill.id, values=(skill.name, current, history))
+        rows = self.catalog_tree.get_children()
+        if rows:
+            self.catalog_tree.selection_set(selected[0] if selected and self.catalog_tree.exists(selected[0]) else rows[0])
+            self.show_skill()
+        else:
+            self.put_text(self.skill_details, "没有匹配的技能。请清空搜索词或检查扫描来源。", True)
 
     def selected_skill(self):
         selected = self.catalog_tree.selection()
@@ -339,8 +461,8 @@ class App:
             return
         info = [skill.name, skill.description, "", "路径：" + skill.path, "SHA-256：" + skill.sha256,
                 "", "当前证据：主文件读取与静态链接检查；未运行技能。",
-                "宿主启用状态：" + ("历史快照禁用" if skill.enabled is False else "未进行当前宿主核验"),
-                "历史入口类别：" + skill.visibility,
+                "启用状态：" + (("历史快照禁用" if skill.captured_at else "本机配置禁用") if skill.enabled is False else ("配置启用，未进行连接或执行测试" if skill.enabled is True else "未从配置确定")),
+                "入口类别：" + skill.visibility,
                 "历史运行证据：" + json.dumps(skill.historical or {"status": "未验证"}, ensure_ascii=False, indent=2),
                 "快照时间：" + (skill.captured_at or "无"),
                 "源文件与快照：" + ({True: "一致", False: "不一致或缺失", None: "无历史快照"}[skill.evidence_matches]), ""]
@@ -371,8 +493,6 @@ class App:
         if step:
             step.update(title=self.title_var.get().strip(), instruction=self.instruction_text.get("1.0", "end-1c").strip(),
                         outputs=[s.strip() for s in self.outputs_text.get("1.0", "end-1c").splitlines() if s.strip()])
-            if step["kind"] == "review":
-                step["criteria"] = self.criteria_text.get("1.0", "end-1c").strip()
 
     def apply_editor(self):
         self.commit_editor()
@@ -390,20 +510,19 @@ class App:
         self.title_var.set(step["title"] if step else "")
         self.put_text(self.instruction_text, step["instruction"] if step else "")
         self.put_text(self.outputs_text, "\n".join(step.get("outputs", [])) if step else "")
-        self.put_text(self.criteria_text, step.get("criteria", "") if step else "")
-        self.source_label.configure(text=(f"ID：{sid}\n来源：{step.get('skill_path', '人工审核节点')}" if step else "选择一个步骤进行编辑"))
+        self.source_label.configure(text=(f"ID：{sid}\n来源：{step['skill_path']}" if step else "选择一个步骤进行编辑"))
 
     def refresh_steps(self, select=None):
         self.selected_step = None
         self.step_tree.delete(*self.step_tree.get_children())
         for index, step in enumerate(self.model.workflow["steps"], 1):
-            self.step_tree.insert("", "end", iid=step["id"], values=(index, "人工审核" if step["kind"] == "review" else "技能", step["title"]))
+            self.step_tree.insert("", "end", iid=step["id"], values=(index, "技能", step["title"]))
         if select and self.step_tree.exists(select):
             self.step_tree.selection_set(select)
             self.step_tree.see(select)
         else:
             self.title_var.set("")
-            for widget in (self.instruction_text, self.outputs_text, self.criteria_text):
+            for widget in (self.instruction_text, self.outputs_text):
                 self.put_text(widget, "")
         self.select_step()
 
@@ -412,11 +531,6 @@ class App:
         self.name_var.set(self.model.workflow["name"])
         self.description_var.set(self.model.workflow["description"])
         self.refresh_steps()
-
-    def add_review(self):
-        self.commit_editor()
-        self.model.add_review()
-        self.refresh_steps(self.model.workflow["steps"][-1]["id"])
 
     def _selected_index(self):
         selected = self.step_tree.selection()
@@ -455,14 +569,16 @@ class App:
             self.load_workflow(path)
 
     def load_workflow(self, path):
-        workflow, version = read_json_versioned(path)
+        original, version = read_json_versioned(path)
+        workflow = upgrade_workflow(original)
         require_valid(workflow, check_sources=False)
         self.model.workflow = workflow
         self.workflow_path, self.workflow_version = Path(path), version
-        self.saved_workflow = copy.deepcopy(workflow)
+        self.saved_workflow = copy.deepcopy(original)
         self.show_workflow()
         self.notebook.select(self.flow_tab)
-        self.status.set(f"已载入 {path}；导出或启动前会重新校验源文件。")
+        changed = "旧格式已转换为纯技能草稿，保存后才会写回文件。" if workflow != original else "导出或启动前会重新校验源文件。"
+        self.status.set(f"已载入 {path}；{changed}")
 
     def confirm_preview(self, title, text):
         dialog = tk.Toplevel(self.root)
@@ -529,6 +645,7 @@ class App:
         if isinstance(data, dict) and "workflow" in data:
             validate_run(data)
         else:
+            data = upgrade_workflow(data)
             require_valid(data, check_sources=False)
         target = filedialog.asksaveasfilename(title="选择要恢复到的文件", defaultextension=".json", parent=self.root)
         if not target:
@@ -575,8 +692,8 @@ class App:
         ready = ready_steps(self.run)
         for step in self.run["workflow"]["steps"]:
             state = self.run["states"][step["id"]]["status"]
-            condition = "可以推进" if step["id"] in ready else ("已结束" if state in ("approved", "completed") else "等待上游通过")
-            self.run_tree.insert("", "end", iid=step["id"], values=(step["title"], "人工审核" if step["kind"] == "review" else "技能", STATUS[state], condition))
+            condition = "可以推进" if step["id"] in ready else ("已结束" if state == "completed" else "等待上游完成")
+            self.run_tree.insert("", "end", iid=step["id"], values=(step["title"], "技能", STATUS[state], condition))
         self.run_summary.configure(text=f"{self.run['workflow']['name']} · {'全部完成' if self.run['status'] == 'completed' else '跟踪中'} · {self.run_path}")
         if ready:
             self.run_tree.selection_set(ready[0])
@@ -584,12 +701,11 @@ class App:
 
     def show_run_step(self):
         selected = self.run_tree.selection()
-        for button in (self.complete_button, self.approve_button, self.reject_button):
-            button.configure(state="disabled")
+        self.complete_button.configure(state="disabled")
         if not self.run or not selected:
             self.commit_run_draft()
             self.selected_run_step = None
-            self.put_text(self.run_details, "选择运行步骤查看任务、产物要求和审核记录。", True)
+            self.put_text(self.run_details, "选择运行步骤查看任务、产物要求和执行记录。", True)
             return
         sid = selected[0]
         if sid != self.selected_run_step:
@@ -598,31 +714,25 @@ class App:
             draft = self.run_drafts.get(sid, {})
             self.put_text(self.note_text, draft.get("note", ""))
             self.put_text(self.artifacts_text, draft.get("artifacts", ""))
-        step = next(s for s in self.run["workflow"]["steps"] if s["id"] == sid)
         self.put_text(self.run_details, format_run_details(self.run, sid), True)
         if sid in ready_steps(self.run):
-            buttons = (self.complete_button,) if step["kind"] == "skill" else (self.approve_button, self.reject_button)
-            for button in buttons:
-                button.configure(state="normal")
+            self.complete_button.configure(state="normal")
 
-    def transition(self, decision=None):
+    def transition(self):
         if not self.run or not self.run_tree.selection():
             raise ValueError("请选择运行步骤")
         proposed = copy.deepcopy(self.run)
         sid = self.run_tree.selection()[0]
         note = self.note_text.get("1.0", "end-1c").strip()
-        if decision:
-            review_step(proposed, sid, decision, note)
-        else:
-            artifacts = [s.strip() for s in self.artifacts_text.get("1.0", "end-1c").splitlines() if s.strip()]
-            complete_step(proposed, sid, note, artifacts)
+        artifacts = [s.strip() for s in self.artifacts_text.get("1.0", "end-1c").splitlines() if s.strip()]
+        complete_step(proposed, sid, note, artifacts)
         if self.confirm_preview("登记进度 · 差异预览", preview_json(self.run_path, proposed)):
             self.run_version = save_json(self.run_path, proposed, expected_digest=self.run_version)
             self.run = proposed
             self.run_drafts.pop(sid, None)
             self.selected_run_step = None
             self.refresh_run()
-            self.status.set("进度已保存；审核未通过的下游仍保持阻塞。")
+            self.status.set("进度已保存；后续技能将按依赖关系推进。")
 
     def commit_run_draft(self):
         if self.selected_run_step is not None:
@@ -642,13 +752,13 @@ class App:
             self.root.destroy()
 
 
-def launch(*, roots=None, atlas=None, workflow_path=None):
+def launch(*, roots=None, atlas=None, workflow_path=None, codex_home=None, projects=()):
     root = tk.Tk()
-    app = App(root)
+    app = App(root, codex_home=codex_home, projects=projects, autoload=False)
     app.roots = roots or []
     app.atlas_path = atlas
+    app.source_mode = "atlas" if atlas else ("roots" if roots else "local")
     if workflow_path:
         app.action(lambda: app.load_workflow(workflow_path))()
-    if roots or atlas:
-        root.after(100, app.refresh_scan)
+    root.after(50, app.load_initial_inventory)
     root.mainloop()

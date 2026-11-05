@@ -1,6 +1,6 @@
 ---
 name: extract-evidence
-description: 从用户提供的文章中提取可核查的主张、证据和限制，用于后续人工审核。
+description: 从用户提供的文章中提取可核查的主张、证据、来源定位和限制。
 ---
 
 # 提取证据

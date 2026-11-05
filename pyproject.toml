@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-skill-to-workflow"
-version = "0.1.0"
-description = "Python skill workflow builder with explicit human review gates"
+version = "0.2.0"
+description = "Python local Skills, MCP and plugin inventory with skill workflow composition"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0,<7"]

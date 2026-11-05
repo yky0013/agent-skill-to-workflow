@@ -12,8 +12,5 @@ def example_workflow(root):
         return {"id": identifier, "kind": "skill", "title": identifier, "depends_on": deps,
                 "instruction": "处理输入并核查结果", "outputs": ["report.md"],
                 "skill_path": skill.path, "skill_sha256": skill.sha256}
-    return {"schemaVersion": 1, "name": "example-flow", "description": "用于有人工审核的示例任务",
-            "steps": [task("prepare", []),
-                      {"id": "approve", "kind": "review", "title": "人工审核", "depends_on": ["prepare"],
-                       "instruction": "检查报告", "outputs": [], "criteria": "证据充分，产物可读"},
-                      task("publish", ["approve"])]}
+    return {"schemaVersion": 2, "name": "example-flow", "description": "用于依次准备、转换并发布结果的示例任务",
+            "steps": [task("prepare", []), task("transform", ["prepare"]), task("publish", ["transform"])]}

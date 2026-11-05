@@ -1,8 +1,8 @@
 # Agent Skill to Workflow
 
-把独立 skill 编排成带人工审核的工作流，再导出为可复用的组合 `SKILL.md`。
+查看本机 Skills、MCP 和插件，把独立 skill 串成工作流，再导出为可复用的组合 `SKILL.md`。
 
-新工作台使用 **Python + Tkinter**，提供中文桌面界面和 CLI。它可以复用先前的技能筛查 atlas，保留原文、来源路径、历史运行证据和显式指向关系，并在源文件发生变化时提示重新核对。
+工作台使用 **Python + Tkinter**，提供中文桌面界面和 CLI。启动后自动显示真实本机能力清单，也可以导入以前的筛查 atlas。工作流由技能步骤组成，完成上一步后直接按依赖推进。
 
 ## Python 工作台快速开始
 
@@ -16,24 +16,35 @@ python -m venv .venv
 
 macOS/Linux 使用 `.venv/bin/python` 替代 `.venv/Scripts/python`。Windows 安装后也可双击 `launch_workbench.pyw`。
 
-- **技能目录**：只读扫描多个根目录、搜索、读取 SKILL.md，导入历史 `atlas.json`，区分同名入口和过期证据。
-- **编排与导出**：添加技能步骤与人工审核点，编辑任务说明、产物和审核标准，保存/载入 JSON，校验依赖与来源，导出组合 skill。
-- **人工审核与运行**：登记实际执行结果、产物引用和本次审核决定；退回阻塞下游，关闭后可恢复。
+- **Skills 列表**：默认打开并自动扫描用户技能、Agents 技能、插件技能和项目入口；支持搜索、原文阅读、来源查看和加入工作流。
+- **MCP 列表**：显示本机 `config.toml` 与插件声明中的 MCP 名称、连接类型、配置启用状态及来源。凭据值不会显示。
+- **插件列表**：查看本机配置声明及缓存清单、版本、说明和目录。缓存发现与配置启用分开标注。
+- **编排与导出**：添加和排序技能步骤，编辑任务与产物，保存/载入 JSON，导出组合 skill。
+- **运行记录**：登记实际执行结果与产物，按依赖推进，关闭后可恢复。
 - **文件保护**：写入前预览，覆盖前备份，版本冲突检查，原子保存；导出目录存在时拒绝覆盖。
 
-工作台负责编排和跟踪，**不会自动调用模型或执行技能命令**。历史样例通过、当前文件可读取和实际任务完成分别记录。导出指令中的审核约束依赖宿主遵循，应用内审核状态机则会阻止越过未通过节点。
+工作台负责编排和跟踪，**不会自动调用模型或执行技能命令**。列表中的配置状态不等于连接测试结果，历史样例通过也不等于当前任务已完成。
+
+直接启动不需要指定目录。使用不同 Codex 配置目录时，可点击「选择 Codex 目录」或传入 `--codex-home`。命令行读取本机清单：
+
+```powershell
+python -m skill_workflow inventory
+python -m skill_workflow gui --codex-home C:/path/to/.codex --project C:/path/to/project
+```
+
+以下命令仅用于加载仓库自带的两份演示技能：
 
 ```powershell
 python examples/create_demo.py demo-workflow.json --apply
 python -m skill_workflow gui --root ./examples/skills --workflow demo-workflow.json
 python -m skill_workflow validate demo-workflow.json
-python -m skill_workflow export demo-workflow.json ./reviewed-reading-brief --apply
+python -m skill_workflow export demo-workflow.json ./reading-brief --apply
 python -m unittest discover -s tests -v
 ```
 
 所有 CLI 写入默认预览，显式 `--apply` 才保存。示例脚本和新建运行要求目标尚不存在。
 
-[完整使用说明、数据格式与限制](docs/python-workbench.md) · [设计说明](docs/superpowers/specs/2026-11-05-python-workflows-design.md)
+[完整使用说明、数据格式与限制](docs/python-workbench.md) · [当前实现范围](docs/superpowers/plans/2026-11-05-inventory-without-review.md)
 
 ## 保留的原 Codex Manager 应用
 

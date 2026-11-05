@@ -38,10 +38,14 @@ class StorageExportTests(unittest.TestCase):
         text = (target / "SKILL.md").read_text(encoding="utf-8")
         front = yaml.safe_load(text.split("---", 2)[1])
         self.assertEqual(front["name"], "example-flow")
-        self.assertLess(text.index("prepare"), text.index("approve"))
-        self.assertIn("人工审核", text)
+        self.assertLess(text.index("prepare"), text.index("transform"))
+        self.assertLess(text.index("transform"), text.index("publish"))
+        for removed in ("人工审核", "审核标准", "等待本次", "criteria"):
+            self.assertNotIn(removed, text)
         exported = json.loads((target / "workflow.json").read_text(encoding="utf-8"))
         self.assertEqual(exported, self.flow)
+        self.assertEqual(exported["schemaVersion"], 2)
+        self.assertEqual({step["kind"] for step in exported["steps"]}, {"skill"})
         lock = json.loads((target / "sources.lock.json").read_text(encoding="utf-8"))
         self.assertEqual(lock["sources"][0]["sha256"], self.flow["steps"][0]["skill_sha256"])
 

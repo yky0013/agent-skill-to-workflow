@@ -15,14 +15,14 @@ def now():
 
 def create_run(workflow) -> dict:
     require_valid(workflow)
-    return {"schemaVersion": 1, "id": uuid.uuid4().hex, "created_at": now(),
+    return {"schemaVersion": 2, "id": uuid.uuid4().hex, "created_at": now(),
             "workflow": copy.deepcopy(workflow), "workflow_sha256": digest_bytes(json_bytes(workflow)),
             "status": "active", "states": {s["id"]: {"status": "pending", "note": "", "artifacts": []} for s in workflow["steps"]},
             "events": []}
 
 
 def _satisfied(state):
-    return state["status"] in ("completed", "approved")
+    return state["status"] == "completed"
 
 
 def _timestamp(value):
@@ -37,7 +37,9 @@ def _timestamp(value):
 
 
 def validate_run(run):
-    if not isinstance(run, dict) or type(run.get("schemaVersion")) is not int or run["schemaVersion"] != 1:
+    if isinstance(run, dict) and type(run.get("schemaVersion")) is int and run["schemaVersion"] == 1:
+        raise ValueError("旧版 schemaVersion=1 运行记录不能升级；请从升级后的工作流新建运行")
+    if not isinstance(run, dict) or type(run.get("schemaVersion")) is not int or run["schemaVersion"] != 2:
         raise ValueError("不支持的运行记录格式")
     identifier = run.get("id")
     if not isinstance(identifier, str):
@@ -68,16 +70,15 @@ def validate_run(run):
         step = steps[sid]
         if _satisfied(replay[sid]) or not all(_satisfied(replay[d]) for d in step["depends_on"]):
             raise ValueError(f"运行事件顺序非法或依赖尚未通过：{sid}")
-        allowed = ("completed",) if step["kind"] == "skill" else ("approved", "rejected")
-        if event["status"] not in allowed:
+        if event["status"] != "completed":
             raise ValueError(f"运行事件状态不符合步骤类型：{sid}")
         if not isinstance(event["note"], str) or not event["note"].strip():
-            raise ValueError("完成/审核事件缺少说明")
+            raise ValueError("完成事件缺少说明")
         _timestamp(event["at"])
         artifacts = event["artifacts"]
         if not isinstance(artifacts, list) or not all(isinstance(a, str) and a.strip() for a in artifacts):
             raise ValueError("事件产物引用格式无效")
-        if (step["kind"] == "skill" and step.get("outputs") and not artifacts) or (step["kind"] == "review" and artifacts):
+        if step.get("outputs") and not artifacts:
             raise ValueError("事件产物不符合步骤要求")
         replay[sid] = {key: value for key, value in event.items() if key != "step_id"}
     if states != replay:
@@ -93,13 +94,13 @@ def ready_steps(run) -> list[str]:
             if not _satisfied(run["states"][s["id"]]) and all(_satisfied(run["states"][d]) for d in s["depends_on"])]
 
 
-def _prepare(run, sid, kind, note):
+def _prepare(run, sid, note):
     validate_run(run)
     step = next((s for s in run["workflow"]["steps"] if s["id"] == sid), None)
-    if step is None or step["kind"] != kind:
-        raise ValueError("步骤类型错误；人工审核必须使用 review 操作")
+    if step is None:
+        raise ValueError("未找到要完成的技能步骤")
     if not isinstance(note, str) or not note.strip():
-        raise ValueError("必须填写完成或审核说明")
+        raise ValueError("必须填写完成说明")
     if sid not in ready_steps(run):
         raise ValueError("前置步骤尚未通过，或该步骤已结束")
     require_valid(run["workflow"])
@@ -114,14 +115,7 @@ def _record(run, sid, status, note, artifacts):
 
 
 def complete_step(run, sid, note, artifacts):
-    step = _prepare(run, sid, "skill", note)
+    step = _prepare(run, sid, note)
     if not isinstance(artifacts, list) or not all(isinstance(a, str) and a.strip() for a in artifacts) or (step.get("outputs") and not artifacts):
         raise ValueError("请登记至少一个产物引用；记录不代表已验证文件内容")
     _record(run, sid, "completed", note, artifacts)
-
-
-def review_step(run, sid, decision, note):
-    _prepare(run, sid, "review", note)
-    if decision not in ("approved", "rejected"):
-        raise ValueError("审核决定只能是 approved 或 rejected")
-    _record(run, sid, decision, note, [])
