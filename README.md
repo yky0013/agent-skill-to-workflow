@@ -1,4 +1,56 @@
-# Codex Manager (Tauri)
+# Agent Skill to Workflow
+
+查看本机 Skills、MCP 和插件，把独立 skill 串成工作流，再导出为可复用的组合 `SKILL.md`。
+
+工作台使用 **Python + Tkinter**，提供中文桌面界面和 CLI。启动后自动显示真实本机能力清单，也可以导入以前的筛查 atlas。工作流由技能步骤组成，完成上一步后直接按依赖推进。
+
+## Python 工作台快速开始
+
+需要 Python 3.11+（含 Tkinter）。Windows 的官方 Python 安装通常提供 Tkinter；Linux 可能需单独安装 `python3-tk`。
+
+```powershell
+python -m venv .venv
+.venv/Scripts/python -m pip install -e .
+.venv/Scripts/python -m skill_workflow gui
+```
+
+macOS/Linux 使用 `.venv/bin/python` 替代 `.venv/Scripts/python`。Windows 安装后也可双击 `launch_workbench.pyw`。
+
+- **Skills 列表**：默认打开并自动扫描用户技能、Agents 技能、插件技能和项目入口；支持搜索、原文阅读、来源查看和加入工作流。
+- **MCP 列表**：显示本机 `config.toml` 与插件声明中的 MCP 名称、连接类型、配置启用状态及来源。凭据值不会显示。
+- **插件列表**：查看本机配置声明及缓存清单、版本、说明和目录。缓存发现与配置启用分开标注。
+- **编排与导出**：添加和排序技能步骤，编辑任务与产物，保存/载入 JSON，导出组合 skill。
+- **运行记录**：登记实际执行结果与产物，按依赖推进，关闭后可恢复。
+- **文件保护**：写入前预览，覆盖前备份，版本冲突检查，原子保存；导出目录存在时拒绝覆盖。
+
+工作台负责编排和跟踪，**不会自动调用模型或执行技能命令**。列表中的配置状态不等于连接测试结果，历史样例通过也不等于当前任务已完成。
+
+直接启动不需要指定目录。使用不同 Codex 配置目录时，可点击「选择 Codex 目录」或传入 `--codex-home`。命令行读取本机清单：
+
+```powershell
+python -m skill_workflow inventory
+python -m skill_workflow gui --codex-home C:/path/to/.codex --project C:/path/to/project
+```
+
+以下命令仅用于加载仓库自带的两份演示技能：
+
+```powershell
+python examples/create_demo.py demo-workflow.json --apply
+python -m skill_workflow gui --root ./examples/skills --workflow demo-workflow.json
+python -m skill_workflow validate demo-workflow.json
+python -m skill_workflow export demo-workflow.json ./reading-brief --apply
+python -m unittest discover -s tests -v
+```
+
+所有 CLI 写入默认预览，显式 `--apply` 才保存。示例脚本和新建运行要求目标尚不存在。
+
+[完整使用说明、数据格式与限制](docs/python-workbench.md) · [当前实现范围](docs/superpowers/plans/2026-11-05-inventory-without-review.md)
+
+## 保留的原 Codex Manager 应用
+
+`src-tauri/` 与 `src/` 继续提供原来的 Tauri/Rust/React 配置管理应用。下文是该应用的原有说明；Python 工作台是本仓库新增的独立入口，尚未替换原应用的配置编辑、聊天和终端功能。
+
+### Codex Manager (Tauri)
 
 Codex Manager is a desktop configuration and asset manager for OpenAI Codex.
 It edits and organizes on-disk Codex files with a safety-first flow (diff preview, backups, atomic writes),
